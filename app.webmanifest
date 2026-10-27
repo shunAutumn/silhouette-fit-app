@@ -1,0 +1,16 @@
+{
+  "name": "シルエット試着",
+  "short_name": "シルエット試着",
+  "description": "自分の体型の 3D アバターに服を重ね着して、サイズ感と着こなしを確かめるアプリ",
+  "lang": "ja",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#111215",
+  "theme_color": "#111215",
+  "icons": [
+    { "src": "icons/192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
