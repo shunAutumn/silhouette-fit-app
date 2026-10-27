@@ -83,6 +83,9 @@ button { cursor: pointer; }
 .legend span { display: flex; align-items: center; gap: 6px; }
 .legend i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
 .lg-tight { background: var(--tight); } .lg-snug { background: var(--snug); } .lg-good { background: var(--good); } .lg-loose { background: var(--loose); } .lg-big { background: var(--big); }
+.busy { position: absolute; left: 50%; bottom: 66px; transform: translateX(-50%); margin: 0; display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; color: var(--ink); background: color-mix(in srgb, var(--card) 85%, transparent); backdrop-filter: blur(10px); border: 1px solid var(--line); padding: 6px 12px; border-radius: 999px; }
+.busy i { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--line2); border-top-color: var(--accent); animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
 .hint-drag { position: absolute; top: 14px; right: 16px; margin: 0; font-size: 11px; color: var(--muted); pointer-events: none; transition: opacity .6s; }
 
 /* ---------- パネル共通 ---------- */

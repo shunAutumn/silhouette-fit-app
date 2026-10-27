@@ -172,31 +172,46 @@
   function changed() { saveOutfit(); rebuild(); renderSide(); }
 
   /* ---------- 立体表示 ---------- */
-  let bodyKey = ''; let bodyParts = null;
+  let bodyKey = ''; let bodyParts = null; let rebuildQueued = false;
+  // 着替え・体のデータの変更は計算に時間がかかるので、「計算中…」を出してから行う
   function rebuild() {
+    if (!ready || rebuildQueued) return;
+    rebuildQueued = true;
+    const busy = $('[data-r="busy"]'); if (busy) busy.hidden = false;
+    requestAnimationFrame(() => setTimeout(() => {
+      rebuildQueued = false;
+      try { rebuildNow(); } finally { if (busy) busy.hidden = true; }
+    }, 0));
+  }
+  function rebuildNow() {
     if (!ready) return;
     const key = JSON.stringify(['height', 'shoulder', 'chest', 'waist', 'hip', 'arm', 'inseam', 'sex'].map((k) => S.profile[k]));
     if (key !== bodyKey || !model) { model = M3.body(S.profile); bodyKey = key; bodyParts = M3.bodyMeshes(model); }
     if (!R) return;
     const P = C.normalizeProfile(S.profile);
+    let lift = 0; let dr = null;
+    if (!S.measure) {
+      const outfit = resolveOutfit();
+      dr = M3.dress(model, outfit);
+      // 手が服にめり込むときは、腕を少し開いた姿勢で作り直す
+      const need = Math.min(M3.handClearance(model, dr), model.clear + 25);
+      if (need > model.clear + 0.5) { model = M3.body(S.profile, { clear: need }); bodyParts = M3.bodyMeshes(model); dr = M3.dress(model, outfit); }
+      lift = dr.lift;
+    }
     const skin = M3.hexRGB(S.profile.skin || '#E6C4A6');
     const grey = [0.8, 0.81, 0.84];
     const tint = P.count === 0 ? 0 : Math.max(0, (1 - P.count / C.FIELDS.length) * 0.8);
-    const hair = null; // MakeHuman の髪の補助形状は板状で不自然なので表示しない
     const list = [];
     bodyParts.forEach((b) => {
-      if (b.id === 'body') list.push({ mesh: b.mesh, mat: 0, color: P.count === 0 ? grey : skin, tint });
+      if (b.id === 'body') list.push({ mesh: dr ? Object.assign({}, b.mesh, { idx: M3.maskedBody(model, dr) }) : b.mesh, mat: 0, color: P.count === 0 ? grey : skin, tint });
       else if (b.id === 'eyes') list.push({ mesh: b.mesh, mat: 15, color: [1, 1, 1], tint: P.count === 0 ? 1 : 0 });
-      else if (hair) list.push({ mesh: b.mesh, mat: 16, color: M3.hexRGB(hair), tint: P.count === 0 ? 1 : 0 });
+      // MakeHuman の髪の補助形状は板状で不自然なので表示しない
     });
-    let lift = 0;
     if (S.measure) {
       M3.guides(model).forEach((g) => {
         list.push({ mesh: g.mesh, mat: 9, key: g.key, color: P.filled[g.key] ? M3.hexRGB(FIELD[g.key].color) : [0.7, 0.72, 0.76], hi: S.focus === g.key ? 1 : 0 });
       });
     } else {
-      const dr = M3.dress(model, resolveOutfit());
-      lift = dr.lift;
       dr.parts.forEach((p) => list.push({
         mesh: p.mesh, mat: M3.FABRIC_ID[p.fabric] != null ? M3.FABRIC_ID[p.fabric] : 1, color: M3.hexRGB(p.color),
         cut: p.cut, placket: p.placket, fit: S.fit, uid: p.uid, print: S.fit ? null : p.print,
@@ -488,7 +503,7 @@
     if (!S.outfit.length) { toast('何か着てから保存してください'); return; }
     const nameEl = $('[data-r="coord-name"]');
     const name = (nameEl && nameEl.value.trim()) || `コーデ ${S.coords.length + 1}`;
-    if (S.measure) setMeasure(false);
+    if (S.measure) { S.measure = false; rebuildNow(); }
     let thumb = '';
     try { if (R) thumb = R.snapshot(240, 300); } catch (e) { thumb = ''; }
     S.coords.push({ id: uid(), name, created: Date.now(), thumb, outfit: S.outfit.map((e) => Object.assign({}, e)) });

@@ -139,7 +139,7 @@
 
   const FABRICS = {
     jersey: '天竺（Tシャツ生地）', rib: 'リブ', denim: 'デニム', twill: 'ツイル（チノ）', woven: 'ブロード（シャツ生地）',
-    knit: 'ニット', wool: 'ウール', linen: 'リネン', nylon: 'ナイロン', leather: 'レザー', canvas: 'キャンバス', mesh: 'メッシュ',
+    knit: 'ニット', wool: 'ウール', fleece: 'フリース・ボア', linen: 'リネン', nylon: 'ナイロン', leather: 'レザー', canvas: 'キャンバス', mesh: 'メッシュ',
   };
 
   /* ---------- 推定（商品名・ページの文章から） ---------- */
@@ -188,7 +188,7 @@
     return { cat: 'tee', style: 'crew', sure: false };
   }
   const FABRIC_RULES = [
-    [/デニム|denim/i, 'denim'], [/レザー|革|leather/i, 'leather'], [/ウール|カシミ|wool|cashmere/i, 'wool'],
+    [/フリース|ポーラテック|polartec|fleece|ボア|sherpa/i, 'fleece'], [/デニム|denim/i, 'denim'], [/レザー|革|leather/i, 'leather'], [/ウール|カシミ|wool|cashmere/i, 'wool'],
     [/リネン|麻|linen/i, 'linen'], [/ナイロン|nylon/i, 'nylon'], [/メッシュ|mesh/i, 'mesh'], [/キャンバス|canvas/i, 'canvas'],
   ];
   function guessFabric(text, cat) {

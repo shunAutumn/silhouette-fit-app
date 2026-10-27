@@ -61,7 +61,7 @@ void main(){
     float weft = vn(uv*40.);
     alb = mix(alb, lin(vec3(.86,.88,.92)), .08*weft*aa + .05*slub);
     alb *= .9 + .2*mix(.5, line, aa);
-    float wr = clamp(vObjN.z + .25, 0., 1.)*(exp(-pow((vObj.y-uLegY.x)/13., 2.)) + .8*exp(-pow((vObj.y-uLegY.y)/7., 2.)));
+    float wr = clamp(vObjN.z + .25, 0., 1.)*(exp(-pow((vObj.y-uLegY.x)/13., 2.)) + .3*exp(-pow((vObj.y-uLegY.y)/9., 2.)));
     wr *= .6 + .4*fbm(uv*vec2(.25, .5));
     alb = mix(alb, mix(alb, lin(vec3(.62,.7,.82)), .4), clamp(wr*.35, 0., .22));
     h = line*.45*aa + slub*.04; spec = .03; gloss = 10.; sheen = .15;
@@ -76,7 +76,10 @@ void main(){
     float wv = mix(a, b, step(.5, fract(uv.x*4.5 + .5*step(.5, fract(uv.y*4.5)))));
     h = wv*.4*aa + fbm(uv*2.)*.2; alb *= .94 + .08*wv*aa; spec = .04; gloss = 8.;
   } else if (uMat == 6) {
-    h = fbm(uv*1.2)*.2; spec = .5; gloss = 30.; sheen = .1;
+    h = fbm(uv*1.2)*.2 + vn(uv*6.)*.08*aa; spec = .16; gloss = 22.; sheen = .12;
+  } else if (uMat == 17) {
+    float fz = fbm(uv*2.5); float pile = vn(uv*12.);
+    h = fz*.35 + pile*.25*aa; alb *= .9 + .14*fz; spec = .0; gloss = 2.; sheen = .75;
   } else if (uMat == 7) {
     float col = fract(uv.x*1.1); float row = fract(uv.y*1.5 + abs(col-.5)*.9);
     float v = smoothstep(0., .5, row)*smoothstep(1., .5, row);
@@ -185,7 +188,7 @@ void main(){ float d = length(vP); float a = (1. - smoothstep(.15, 1., d))*uA; o
 
   function create(canvas, opts) {
     opts = opts || {};
-    const gl = canvas.getContext('webgl2', { antialias: true, alpha: true, premultipliedAlpha: true });
+    const gl = canvas.getContext('webgl2', { antialias: true, alpha: true, premultipliedAlpha: true, depth: true });
     if (!gl) return null;
     const prog = compile(gl, VS, FS);
     const sh = compile(gl, SVS, SFS);
@@ -264,7 +267,8 @@ void main(){ float d = length(vP); float a = (1. - smoothstep(.15, 1., d))*uA; o
       const dist = Math.max(fitH, fitW) / view.zoom;
       const ty = clamp(H * 0.5 + view.panY, H * 0.12, H * 0.95);
       const eye = [0, ty + dist * 0.06, dist];
-      const proj = perspective(fov, asp, 5, dist * 4 + 400);
+      // 奥行きの範囲は人型のまわりだけに絞る（広いと体と服の 0.4cm の差を描き分けられず、肌が透ける）
+      const proj = perspective(fov, asp, Math.max(5, dist - 160), dist + 160);
       const vw = lookAt(eye, [0, ty, 0]);
       gl.enable(gl.DEPTH_TEST);
       gl.disable(gl.CULL_FACE);
