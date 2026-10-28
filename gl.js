@@ -59,12 +59,12 @@ void main(){
     float line = smoothstep(0., .35, tw)*smoothstep(1., .65, tw);
     float slub = fbm(vec2(uv.x*1.6, uv.y*.5));
     float weft = vn(uv*40.);
-    alb = mix(alb, lin(vec3(.86,.88,.92)), .08*weft*aa + .05*slub);
+    alb = mix(alb, lin(vec3(.86,.88,.92)), .06*weft*aa + .02*slub);
     alb *= .9 + .2*mix(.5, line, aa);
     float wr = clamp(vObjN.z + .25, 0., 1.)*(exp(-pow((vObj.y-uLegY.x)/13., 2.)) + .3*exp(-pow((vObj.y-uLegY.y)/9., 2.)));
     wr *= .6 + .4*fbm(uv*vec2(.25, .5));
     alb = mix(alb, mix(alb, lin(vec3(.62,.7,.82)), .4), clamp(wr*.35, 0., .22));
-    h = line*.45*aa + slub*.04; spec = .03; gloss = 10.; sheen = .15;
+    h = line*.35*aa + slub*.015; spec = .03; gloss = 10.; sheen = .15;
   } else if (uMat == 3) {
     float r = .5+.5*sin(uv.x*6.283*2.6);
     h = r*.55*aa + fbm(uv)*.1; alb *= .93 + .1*mix(.5, r, aa); spec = .02; gloss = 6.; sheen = .3;
