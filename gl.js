@@ -142,8 +142,14 @@ void main(){
   if (uMat == 0) col += alb*vec3(.18, .05, .03)*(1. - d1)*d1*1.6;
   if (!gl_FrontFacing) col *= .55;
   if (uFit > .5) {
-    float e = vAux.y;
-    vec3 hc = e > 900. ? vec3(.62, .64, .68) : e < 0. ? vec3(.86, .24, .22) : e < 3. ? vec3(.95, .6, .18) : e < 12. ? vec3(.2, .72, .48) : e < 24. ? vec3(.28, .55, .95) : vec3(.6, .42, .9);
+    // 境目は画面上で 1〜2 画素ぶんなめらかにつなぐ（ギザギザを出さない）
+    float e = vAux.y; float w = max(fwidth(e), .05);
+    vec3 hc = vec3(.86, .24, .22);
+    hc = mix(hc, vec3(.95, .6, .18), smoothstep(-w, w, e));
+    hc = mix(hc, vec3(.2, .72, .48), smoothstep(3. - w, 3. + w, e));
+    hc = mix(hc, vec3(.28, .55, .95), smoothstep(12. - w, 12. + w, e));
+    hc = mix(hc, vec3(.6, .42, .9), smoothstep(24. - w, 24. + w, e));
+    if (e > 60.) hc = vec3(.62, .64, .68);
     col = mix(col, lin(hc)*(d1*.65 + .45), .7);
   }
   if (emit > .5) col = alb*(.55 + .55*d1) + uHi*.18;

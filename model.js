@@ -311,8 +311,35 @@
     const M = { P, H, h: H / 170, pos, Y, sk, shHalf: g.shoulder / 2, fit: fm, W, ph, clear: clearX };
     M.nrm = normals(pos, D.idx);
     M.nrmS = smoothNormals(M.nrm, 10); // 服を作るときの向き（体の細かい凹凸を拾わない）
+    M.posC = relaxChest(M);
     M.regions = regions(M);
     return M;
+  }
+
+  // 服が沿う体の面: 胸の前の小さな突起（胸の先など）だけを、まわり（半径 1〜2.5cm の輪）の面の高さまで下げる。
+  // まわりの点に 2 次の面を当てはめて求めるので、胸のふくらみそのものはほとんど変わらない
+  function relaxChest(M) {
+    const P = M.pos; const Y = M.Y; const Q = new Float32Array(P); const zc = M.sk.nk[2];
+    const r0 = 2.0 * M.h; const r1 = 4.5 * M.h;
+    const vs = D.label.trunk.filter((i) => { const y = P[i * 3 + 1]; return P[i * 3 + 2] > zc + 2 && y < Y.pit + 6 && y > Y.waist - 4; });
+    const cell = new Map(); const ck = (x, y) => `${Math.floor(x / r1)},${Math.floor(y / r1)}`;
+    vs.forEach((i) => { const k = ck(P[i * 3], P[i * 3 + 1]); if (!cell.has(k)) cell.set(k, []); cell.get(k).push(i); });
+    vs.forEach((i) => {
+      const x0 = P[i * 3]; const y0 = P[i * 3 + 1]; const z0 = P[i * 3 + 2];
+      const A = Array.from({ length: 6 }, () => new Array(6).fill(0)); const bv = new Array(6).fill(0); let n = 0;
+      const gx = Math.floor(x0 / r1); const gy = Math.floor(y0 / r1);
+      for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) (cell.get(`${gx + dx},${gy + dy}`) || []).forEach((j) => {
+        const u = P[j * 3] - x0; const v = P[j * 3 + 1] - y0; const d = Math.hypot(u, v);
+        if (d < r0 || d > r1 || Math.abs(P[j * 3 + 2] - z0) > 4) return;
+        const f = [1, u, v, u * u, u * v, v * v]; const z = P[j * 3 + 2];
+        for (let p = 0; p < 6; p++) { bv[p] += f[p] * z; for (let q = 0; q < 6; q++) A[p][q] += f[p] * f[q]; }
+        n++;
+      });
+      if (n < 12) return;
+      const zf = solve(A, bv)[0];
+      if (zf < z0) Q[i * 3 + 2] = Math.max(zf, z0 - 1.5);
+    });
+    return Q;
   }
 
   function normals(P, idx) {
@@ -378,7 +405,7 @@
   }
   // 縦の帯（胴・首・腰から下）
   function verticalBands(M, list, yTop, yBot, step, h, passes) {
-    const P = M.pos; const sorted = sortByY(P, list); const out = [];
+    const P = M.posC || M.pos; const sorted = sortByY(P, list); const out = [];
     for (let y = yTop; y >= yBot; y -= step) {
       const xs = []; const zs = [];
       for (let k = lowerBound(P, sorted, y - h); k < sorted.length; k++) { const i = sorted[k]; if (P[i * 3 + 1] > y + h) break; xs.push(P[i * 3]); zs.push(P[i * 3 + 2]); }
@@ -483,6 +510,14 @@
     return best;
   }
   // 横幅（中心から左右の端まで）を maxX までに抑え、足りない周長は前後の厚みで補う（肩が棚のように張り出さないように）
+  // 1 つ前の輪（prev）を、中心のずれを直して帯 bd の断面の向きで読み直した半径（上下で中心が前後にずれても、まっすぐ下へ落ちるように）
+  function rFrom(prev, bd) {
+    const dz = dot(sub(prev.c, bd.c), bd.B); const dx = dot(sub(prev.c, bd.c), bd.N);
+    if (Math.abs(dz) < 0.02 && Math.abs(dx) < 0.02) return prev.r;
+    const xs = []; const zs = [];
+    for (let k = 0; k < NA; k++) { xs.push(prev.r[k] * COS[k] + dx); zs.push(prev.r[k] * SIN[k] + dz); }
+    const h = hull(xs, zs); return h ? radialFromHull(h, 0, 0) : prev.r;
+  }
   function rCapX(r, maxX) {
     let w = 0; for (let k = 0; k < NA; k++) w = Math.max(w, Math.abs(r[k] * COS[k]));
     if (w <= maxX) return r;
@@ -771,10 +806,10 @@
   //   clip(i, p) → 0 以上の頂点だけ残す（裾・袖口・襟ぐりの線は三角形を切ってまっすぐにする）
   function surfaceGarment(M, list, place, clip, opt) {
     opt = opt || {};
-    const P = M.pos; const Nn = M.nrmS || M.nrm;
+    const P = M.posC || M.pos; const Nn = M.nrmS || M.nrm;
     const gi = new Int32Array(D.nv).fill(-1);
     // shell: 体の頂点ごとの、いま着ている服のいちばん外の位置（重ね着で内側の服が突き抜けないように）
-    const SH = opt.shell || M.pos;
+    const SH = opt.shell || P;
     const pos = []; const bpos = []; const spos = []; const bnrm = []; const uvp = []; const aux = []; const fv = []; const src = [];
     list.forEach((i) => {
       if (gi[i] >= 0) return;
@@ -841,7 +876,16 @@
         const ds = (G[x * 3] - SP[x * 3]) * BN[x * 3] + (G[x * 3 + 1] - SP[x * 3 + 1]) * BN[x * 3 + 1] + (G[x * 3 + 2] - SP[x * 3 + 2]) * BN[x * 3 + 2];
         if (ds < gap) for (let q = 0; q < 3; q++) G[x * 3 + q] += BN[x * 3 + q] * (gap - ds);
         // 形の決まった服（靴など）は、ならしたあとも外形の上に戻す
-        if (opt.project && srcC[x] >= 0) { const g = opt.project(srcC[x], [G[x * 3], G[x * 3 + 1], G[x * 3 + 2]]); if (g) { G[x * 3] = g[0]; G[x * 3 + 1] = g[1]; G[x * 3 + 2] = g[2]; } }
+        if (opt.project) { const g = opt.project(srcC[x], [G[x * 3], G[x * 3 + 1], G[x * 3 + 2]]); if (g) { G[x * 3] = g[0]; G[x * 3 + 1] = g[1]; G[x * 3 + 2] = g[2]; } }
+      }
+    }
+    // フィット表示のゆとりの値を、まわりとならす（色の境目がギザギザ・まだらにならないように。値のない頂点は使わない）
+    for (let pass = 0; pass < (opt.easePasses == null ? 12 : opt.easePasses); pass++) {
+      const prev = new Float32Array(cnt); for (let x = 0; x < cnt; x++) prev[x] = AX[x * 4 + 1];
+      for (let x = 0; x < cnt; x++) {
+        if (prev[x] > 900) continue;
+        let s = 0; let m = 0; nb[x].forEach((y) => { if (prev[y] < 900) { s += prev[y]; m++; } });
+        if (m) AX[x * 4 + 1] = prev[x] * 0.4 + (s / m) * 0.6;
       }
     }
     // 次に着る服のために、いちばん外の位置を更新する
@@ -865,6 +909,16 @@
     const Pf = grow(G, 3); const AXf = grow(AX, 4);
     const UVf = grow(U, 2, (o, j, x) => { o[j * 2] = (UP[x * 3] + TAU) * UP[x * 3 + 1]; });
     const n = normals(Pf, I);
+    // 陰影の向きをまわりとならす（体の細かい三角形が多いところで、とがった陰影が出ないように）
+    for (let pass = 0; pass < (opt.nrmPasses == null ? 8 : opt.nrmPasses); pass++) {
+      const prev = n.slice(0, cnt * 3);
+      for (let x = 0; x < cnt; x++) {
+        const L = nb[x]; if (!L.length) continue;
+        let sx = prev[x * 3]; let sy = prev[x * 3 + 1]; let sz = prev[x * 3 + 2];
+        L.forEach((y) => { sx += prev[y * 3]; sy += prev[y * 3 + 1]; sz += prev[y * 3 + 2]; });
+        const l = Math.hypot(sx, sy, sz) || 1; n[x * 3] = sx / l; n[x * 3 + 1] = sy / l; n[x * 3 + 2] = sz / l;
+      }
+    }
     // 複製した頂点の法線は元の頂点とそろえる（継ぎ目に影の線を出さない）
     extraV.forEach((x, j) => { const a = x * 3; const b = (cnt + j) * 3; for (let q = 0; q < 3; q++) { const s = n[a + q] + n[b + q]; n[a + q] = s; n[b + q] = s; } });
     for (let i = 0; i < n.length; i += 3) { const l = Math.hypot(n[i], n[i + 1], n[i + 2]) || 1; n[i] /= l; n[i + 1] /= l; n[i + 2] /= l; }
@@ -893,7 +947,7 @@
 
   // 服の端の外側へも、外側の位置をなだらかに広げる（次の服が端で段にならず、内側の服の端が突き抜けない）
   function taperShell(M, shell) {
-    const P = M.pos; const N = M.nrmS || M.nrm; const E = D.edges; const nv = D.nv;
+    const P = M.posC || M.pos; const N = M.nrmS || M.nrm; const E = D.edges; const nv = D.nv;
     const off = new Float32Array(nv);
     for (let i = 0; i < nv; i++) off[i] = (shell[i * 3] - P[i * 3]) * N[i * 3] + (shell[i * 3 + 1] - P[i * 3 + 1]) * N[i * 3 + 1] + (shell[i * 3 + 2] - P[i * 3 + 2]) * N[i * 3 + 2];
     const o0 = off.slice();
@@ -905,6 +959,43 @@
       }
     }
     for (let i = 0; i < nv; i++) { const d = off[i] - o0[i]; if (d > 0) for (let q = 0; q < 3; q++) shell[i * 3 + q] += N[i * 3 + q] * d; }
+  }
+
+  // 同じ服の、別々に作った部分（腰から上の面と下の筒など）のつなぎ目: 重なる頂点の陰影の向きをそろえる（境目に線が出ないように）
+  function weldNormals(parts) {
+    const byUid = new Map();
+    parts.forEach((p) => { if (p.fabric === 'sole') return; if (!byUid.has(p.uid)) byUid.set(p.uid, []); byUid.get(p.uid).push(p); });
+    const CELL = 0.8; const key = (x, y, z) => `${Math.floor(x / CELL)},${Math.floor(y / CELL)},${Math.floor(z / CELL)}`;
+    byUid.forEach((list) => {
+      if (list.length < 2) return;
+      const grid = new Map();
+      list.forEach((p, pi) => {
+        const Q = p.mesh.pos;
+        for (let v = 0; v < Q.length / 3; v++) { const k = key(Q[v * 3], Q[v * 3 + 1], Q[v * 3 + 2]); if (!grid.has(k)) grid.set(k, []); grid.get(k).push(pi, v); }
+      });
+      const out = list.map((p) => p.mesh.nrm.slice());
+      list.forEach((p, pi) => {
+        const Q = p.mesh.pos; const Nn = p.mesh.nrm;
+        for (let v = 0; v < Q.length / 3; v++) {
+          const x = Q[v * 3]; const y = Q[v * 3 + 1]; const z = Q[v * 3 + 2];
+          const gx = Math.floor(x / CELL); const gy = Math.floor(y / CELL); const gz = Math.floor(z / CELL);
+          let sx = 0; let sy = 0; let sz = 0; let other = false;
+          for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (let c = -1; c <= 1; c++) {
+            const L = grid.get(`${gx + a},${gy + b},${gz + c}`); if (!L) continue;
+            for (let q = 0; q < L.length; q += 2) {
+              const qi = L[q]; const u = L[q + 1]; const R = list[qi].mesh.pos; const RN = list[qi].mesh.nrm;
+              const d = Math.hypot(R[u * 3] - x, R[u * 3 + 1] - y, R[u * 3 + 2] - z); if (d > CELL) continue;
+              const w = 1 - d / CELL; const nd = RN[u * 3] * Nn[v * 3] + RN[u * 3 + 1] * Nn[v * 3 + 1] + RN[u * 3 + 2] * Nn[v * 3 + 2];
+              if (nd < 0.3) continue; // 裏表が違う面は混ぜない
+              sx += RN[u * 3] * w; sy += RN[u * 3 + 1] * w; sz += RN[u * 3 + 2] * w; if (qi !== pi) other = true;
+            }
+          }
+          if (!other) continue;
+          const l = Math.hypot(sx, sy, sz) || 1; out[pi][v * 3] = sx / l; out[pi][v * 3 + 1] = sy / l; out[pi][v * 3 + 2] = sz / l;
+        }
+      });
+      list.forEach((p, pi) => { p.mesh.nrm.set(out[pi]); });
+    });
   }
 
   function dress(M, outfit) {
@@ -924,7 +1015,7 @@
     const env = {}; Object.keys(R).forEach((k) => { env[k] = R[k].map((b) => b.r.slice()); });
     const snap = () => { const o = {}; Object.keys(env).forEach((k) => { o[k] = env[k].map((r) => r.slice()); }); return o; };
     const parts = []; let lift = 0;
-    const shell = new Float32Array(M.pos); // 体の頂点ごとの、いちばん外の服の位置
+    const shell = new Float32Array(M.posC || M.pos); // 体の頂点ごとの、いちばん外の服の位置
     // 靴は先に作る（履き口がズボンの内側に入るように）
     const order = (outfit || []).map((it, li) => ({ it, li })).sort((a, b) => (a.it.cat === 'shoes' ? -1 : 0) - (b.it.cat === 'shoes' ? -1 : 0) || a.li - b.li);
     // 上に重ねるズボン・スカートのウエストの高さ（トップスの裾がその中に入る）
@@ -1039,9 +1130,9 @@
             let w0 = 0; for (let k = 0; k < NA; k++) w0 = Math.max(w0, Math.abs(base[k] * COS[k]));
             gr = rCapX(gr, Math.max(cap, w0));
           }
-          if (prev && bd.y < Y.chest && loose > 4) gr = rMax(gr, rScale(prev.r, 0.997));
+          if (prev && bd.y < Y.chest && loose > 4) gr = rMax(gr, rScale(rFrom(prev, bd), 0.997));
           // 股より下まである丈は、腰のいちばん張ったところから下へまっすぐ落ちる
-          else if (prev && hemY < Y.crotch + 1 && tuck == null && bd.y < Y.hip) gr = rMax(gr, rScale(prev.r, 0.998));
+          else if (prev && hemY < Y.crotch + 1 && tuck == null && bd.y < Y.hip) gr = rMax(gr, rScale(rFrom(prev, bd), 0.998));
           // ズボン・スカートの中に入れた裾は、ウエストの内側で体に沿う
           if (tuck != null && bd.y < tuck + 3) { const k = smooth01((tuck + 3 - bd.y) / 5); gr = gr.map((v, q) => lerp(v, base[q] + 0.1, k)); }
           const tr = (sp.neck === 'crew' || sp.neck === 'hood') && topY - bd.y < 1.8 ? 1 : (ribbed && bd.y - hemY < 5 ? 1 : 0);
@@ -1049,14 +1140,27 @@
         };
         const rings = makeRings(R.torso, env.torso, a, b, shape);
         // 胸の前: 布はいちばん高いところから上下へなだらかに渡る（胸の下のくぼみ・先端の形を拾わない）
-        const chestRange = (g) => g.y > Y.waist && g.y < Y.sh;
+        const chestRange = (g) => g.y > Y.waist - 10 * M.h && g.y < Y.sh;
         for (let dir = 0; dir < 2; dir++) {
           const seq = dir ? rings.slice().reverse() : rings;
           for (let i = 1; i < seq.length; i++) {
             const g = seq[i]; const pr = seq[i - 1]; if (!chestRange(g) || !chestRange(pr)) continue;
-            const dy = Math.abs(g.y - pr.y); const sl = dir ? 0.9 : 0.35; // 上へはすぐ、下へはゆっくり体に戻る
+            const dy = Math.abs(g.y - pr.y); const sl = dir ? 0.9 : 0.25; // 上へはすぐ、下へはゆっくり体に戻る
             for (let k = 0; k <= NA; k++) if (SIN[k] > 0.2) g.r[k] = Math.max(g.r[k], pr.r[k] - sl * dy);
           }
+        }
+        // 胸の先で断面が角にならないよう、前側を左右・上下に丸める（布は先端を丸くおおう）
+        const ci = rings.map((g, i) => (chestRange(g) ? i : -1)).filter((i) => i >= 0);
+        for (let pass = 0; pass < 10; pass++) {
+          ci.forEach((i) => {
+            const g = rings[i]; const r = g.r.slice(); const up = rings[i - 1]; const dn = rings[i + 1];
+            for (let k = 1; k < NA; k++) {
+              if (SIN[k] <= 0.1) continue;
+              let v = (r[k - 1] + 2 * r[k] + r[k + 1]) / 4;
+              if (up && dn) v = (v * 2 + up.r[k] + dn.r[k]) / 4;
+              g.r[k] = Math.max(lerp(r[k], v, smooth01((SIN[k] - 0.1) / 0.3)), g.e0[k] - 1.2);
+            }
+          });
         }
         let cut = null;
         if (sp.neck === 'v') cut = [1, Y.neck + 0.5, sp.vDepth * M.h, 5.5 * M.h, 0, 0, 0, 0];
@@ -1097,7 +1201,7 @@
           let kAll = 0;
           if (!S) {
             if (below) kAll = Math.max(kAll, smooth01((hemCut + 8 - p[1]) / 8));
-            if (p[2] > neckCz) kAll = Math.max(kAll, smooth01((11 * M.h - Math.abs(p[1] - Y.chest)) / 4));
+            if (p[2] > neckCz) kAll = Math.max(kAll, smooth01((Y.chest + 11 * M.h - p[1]) / 4) * smooth01((p[1] - Y.waist + 10 * M.h) / 4));
           }
           const a = pull(sT(p), p, n);
           if (a && kAll > 0) { const a2 = pullOut(sT(p), n, t, true); a.d = add(mul(a.d, 1 - kAll), mul(a2.d, kAll)); }
@@ -1140,15 +1244,52 @@
           low.unshift(Object.assign({}, tJ, { bi: null, c: [0, er.y + 0.5, tJ.c[2]], y: er.y + 0.5, r: rAdd(er.r, -0.05), trim: 0, e0: null }));
           push(low, { placket, printRectFrom: [topY, hemY], region: 'lower' }, { rim1: true });
         }
-        if (sp.neck === 'collar' || sp.neck === 'hood') {
-          const hood = sp.neck === 'hood';
-          const [na, nb] = idxRange(R.neck, (x) => x.y <= Y.neck + (hood ? 5 : cat === 'outer' ? 5 : 3.5) * M.h);
-          const col = makeRings(R.neck, env.neck, na, nb, (bd, e) => {
-            let gr = rAdd(e, t + (hood ? 1.6 : 0.5));
-            if (hood) gr = gr.map((v, k) => v + (SIN[k] < 0 ? -SIN[k] * 3.5 : 0));
-            return { r: gr, ease: null, trim: hood ? 0 : 1 };
-          });
+        if (sp.neck === 'collar') {
+          const [na, nb] = idxRange(R.neck, (x) => x.y <= Y.neck + (cat === 'outer' ? 5 : 3.5) * M.h);
+          const col = makeRings(R.neck, env.neck, na, nb, (bd, e) => ({ r: rAdd(e, t + 0.5), ease: null, trim: 1 }));
           push(col, { noCover: true }, { rim0: true });
+        }
+        if (sp.neck === 'hood') {
+          // フード（下ろした状態）: 背中の上にふくらんで重なり、首のまわりは後ろほど高く立ち上がる。前は首の左右から V 字に重なる
+          const Pc = M.posC; const NS = M.nrmS;
+          const hw = M.shHalf * 0.68; const depth = 22 * M.h; const vw = 7 * M.h; const vDepth = 5.5 * M.h;
+          const back = (p) => smooth01((neckCz + 1 - p[2]) / 7);
+          // 縁までの距離（縁が斜めのところは、傾きの分だけ縮める）
+          const hoodClip = (i, p) => {
+            const b = back(p); const ax = Math.abs(p[0]) / hw; const fx = Math.abs(p[0]) / vw;
+            const low = Y.neck - neckDip(p) - 2.2 * M.h - depth * Math.max(0, 1 - ax * ax) * b - vDepth * Math.max(0, 1 - fx) * (1 - b);
+            const slope = (ax < 1 ? (depth * b * 2 * ax) / hw : 0) + (fx < 1 ? (vDepth * (1 - b)) / vw : 0);
+            const top = Y.neck + (1.2 + 4.8 * b * b) * M.h;
+            return Math.min((p[1] - low) / Math.sqrt(1 + slope * slope), top - p[1]);
+          };
+          const shOff = (i) => (shell[i * 3] - Pc[i * 3]) * NS[i * 3] + (shell[i * 3 + 1] - Pc[i * 3 + 1]) * NS[i * 3 + 1] + (shell[i * 3 + 2] - Pc[i * 3 + 2]) * NS[i * 3 + 2];
+          const sgH = surfaceGarment(M, L.trunk.concat(L.neck), (i, p) => {
+            const d = hoodClip(i, p); if (d < -3) return null;
+            const b = back(p);
+            // ふくらみ: 縁で薄く、背中の中ほどで厚い（布が二重に折り重なっている分）
+            const bul = 0.25 * smooth01(d / 1.5) + (0.9 + 2.1 * b) * M.h * smooth01(d / (3 + 5 * b));
+            return { off: Math.max(t, shOff(i)) + 0.08 + bul, extra: 0, dir: null, ease: null, trim: clamp(0.5 + (1.2 - d) * 0.6, 0, 1) * (1 - b), phi: Math.atan2(p[0], p[2] - neckCz), rbar: 9, sv: p[1], zone: 0 };
+          }, hoodClip, { smooth: 10, shell, gap: 0.08, coverMargin: 1e9 });
+          push(null, { surface: sgH, noCover: true });
+          // ひも: V の左右から胸の上に垂れる
+          const front = L.trunk.filter((i) => Pc[i * 3 + 2] > neckCz + 2);
+          const surfZ = (x, y) => { let z = -Infinity; front.forEach((i) => { if (Math.abs(Pc[i * 3] - x) < 1 && Math.abs(Pc[i * 3 + 1] - y) < 1) z = Math.max(z, shell[i * 3 + 2]); }); return z; };
+          [-1, 1].forEach((sg) => {
+            const x = sg * 2.6 * M.h; const y0 = Y.neck - neckDip([x, 0, neckCz + 10]) - 2.2 * M.h - vDepth * (1 - 2.6 / 7) + 0.6;
+            const rings = []; let sPrev = null; let s0 = 0;
+            for (let k = 0; k <= 12; k++) {
+              const y = y0 - k * 1.4 * M.h; const z = surfZ(x + sg * k * 0.05, y); if (!isFinite(z)) break;
+              const c = [x + sg * k * 0.05, y, z + 0.35]; if (sPrev) s0 += dist(c, sPrev); sPrev = c;
+              rings.push({ c, s: s0 });
+            }
+            if (rings.length < 3) return;
+            const tube = rings.map((g, k) => {
+              const T = norm(sub(rings[Math.min(k + 1, rings.length - 1)].c, rings[Math.max(k - 1, 0)].c));
+              const N = norm(cross([0, 0, 1], T)); const B = cross(T, N);
+              return { c: g.c, N, B, T, s: g.s, r: new Float32Array(NA + 1).fill(k === rings.length - 1 ? 0.4 : 0.22), ease: null, trim: 0 };
+            });
+            push(tube, { noCover: true }, { close0: true, close1: true });
+          });
         }
       } else if (sp.grp === 'bottom' || sp.grp === 'skirt') {
         const wY = sp.waistY; const skirt = sp.grp === 'skirt';
@@ -1163,7 +1304,7 @@
         const tor = makeRings(R.torso, env.torso, a, b, (bd, e, i, prev) => {
           const base = rAdd(e, t); const Ct = tC(bd.y, base); let gr = Ct != null ? rDrape(base, Ct, 1.0) : base;
           // スカートは腰のいちばん張ったところから下へまっすぐ落ちる
-          if (skirt && prev && bd.y < Y.hip) gr = rMax(gr, rScale(prev.r, 0.998));
+          if (skirt && prev && bd.y < Y.hip) gr = rMax(gr, rScale(rFrom(prev, bd), 0.998));
           return { r: gr, ease: Ct != null ? Ct - rPerim(e) : null, trim: wY - bd.y < band ? 1 : 0 };
         });
         const hipR = tor.length ? tor[tor.length - 1] : null;
@@ -1189,7 +1330,7 @@
           const [la, lb] = idxRange(R.lower, (x) => x.y >= hemY && x.y < er.y - 0.5);
           const sk = makeRings(R.lower, env.lower, la, lb, (bd, e) => {
             const tt = clamp((er.y - bd.y) / Math.max(1, er.y - hemY), 0, 1);
-            const gr = rMax(rAdd(e, t), rDrape(er.r.slice(), lerp(rPerim(er.r), Chem, smooth01(tt) * 0.6 + tt * 0.4), 0.8));
+            const gr = rMax(rAdd(e, t), rDrape(er.r.slice(), lerp(rPerim(er.r), Chem, smooth01(tt) * 0.6 + tt * tt * 0.4), 0.8));
             return { r: gr, ease: rPerim(gr) - rPerim(e), trim: 0 };
           }).map((g) => Object.assign({}, g, { c: [0, g.y, tJ.c[2]] }));
           sk.unshift(Object.assign({}, tJ, { bi: null, c: [0, er.y + 0.5, tJ.c[2]], y: er.y + 0.5, r: rAdd(er.r, -0.05), e0: null }));
@@ -1334,6 +1475,7 @@
         });
       }
     });
+    weldNormals(parts);
     const res = { parts, lift };
     M._dress = { key, res };
     return restyle(res);
